@@ -91,155 +91,107 @@ def detect_traffic_light(frame):
 vehicle_history = {}
 violators = set()
 
+def generate_frames():
 
-while True:
+    while True:
 
-    ret, frame = cap.read()
+        ret, frame = cap.read()
 
-    if not ret:
-        print("Frame read failed")
-        break
+        if not ret:
+            print("Frame read failed")
+            break
 
-    signal = detect_traffic_light(frame)
+        signal = detect_traffic_light(frame)
 
-    RED_LIGHT = signal == "RED"
+        RED_LIGHT = signal == "RED"
 
+        rx1, ry1, rx2, ry2 = TRAFFIC_LIGHT_ROI
 
-    rx1, ry1, rx2, ry2 = TRAFFIC_LIGHT_ROI
+        cv2.rectangle(
+            frame,
+            (rx1, ry1),
+            (rx2, ry2),
+            (255, 255, 0),
+            2
+        )
 
-    cv2.rectangle(
-        frame,
-        (rx1, ry1),
-        (rx2, ry2),
-        (255, 255, 0),
-        2
-    )
+        cv2.putText(
+            frame,
+            f"LIGHT: {signal}",
+            (rx1, ry1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 0),
+            2
+        )
 
-    cv2.putText(
-        frame,
-        f"LIGHT: {signal}",
-        (rx1, ry1 - 10),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 0),
-        2
-    )
+        line_color = (
+            (0, 0, 255)
+            if RED_LIGHT
+            else (0, 255, 0)
+        )
 
+        cv2.line(
+            frame,
+            (0, STOP_LINE_Y),
+            (frame.shape[1], STOP_LINE_Y),
+            line_color,
+            3
+        )
 
-    line_color = (0, 0, 255) if RED_LIGHT else (0, 255, 0)
+        results = model.track(
+            frame,
+            persist=True,
+            classes=VEHICLE_CLASSES,
+            conf=0.35,
+            verbose=False
+        )
 
-    cv2.line(
-        frame,
-        (0, STOP_LINE_Y),
-        (frame.shape[1], STOP_LINE_Y),
-        line_color,
-        3
-    )
+        result = results[0]
 
+        if result.boxes.id is not None:
 
-    results = model.track(
-        frame,
-        persist=True,
-        classes=VEHICLE_CLASSES,
-        conf=0.35,
-        verbose=False
-    )
+            boxes = result.boxes.xyxy.cpu().numpy()
+            ids = result.boxes.id.cpu().numpy()
 
-    result = results[0]
+            for box, track_id in zip(boxes, ids):
 
-    if result.boxes.id is not None:
+                x1, y1, x2, y2 = map(int, box)
 
-        boxes = result.boxes.xyxy.cpu().numpy()
-        ids = result.boxes.id.cpu().numpy()
+                vehicle_id = int(track_id)
 
-        for box, track_id in zip(boxes, ids):
+                color = (0, 255, 0)
 
-            x1, y1, x2, y2 = map(int, box)
-
-            vehicle_id = int(track_id)
-
-            cx = (x1 + x2) // 2
-            cy = (y1 + y2) // 2
-
-            if vehicle_id not in vehicle_history:
-                vehicle_history[vehicle_id] = []
-
-            vehicle_history[vehicle_id].append((cx, cy))
-
-            vehicle_history[vehicle_id] = vehicle_history[vehicle_id][-10:]
-
-            points = vehicle_history[vehicle_id]
-
-            if len(points) >= 2:
-
-                prev_y = points[-2][1]
-                curr_y = points[-1][1]
-
-                crossed_line = (
-                    prev_y < STOP_LINE_Y <= curr_y
+                cv2.rectangle(
+                    frame,
+                    (x1, y1),
+                    (x2, y2),
+                    color,
+                    2
                 )
 
-                if crossed_line and RED_LIGHT:
+                cv2.putText(
+                    frame,
+                    f"ID {vehicle_id}",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    color,
+                    2
+                )
 
-                    if vehicle_id not in violators:
+        # ВСЕГДА ОТПРАВЛЯЕМ FRAME
 
-                        violators.add(vehicle_id)
+        ret, buffer = cv2.imencode(".jpg", frame)
 
-                        print(
-                            f"RED LIGHT VIOLATION: Vehicle {vehicle_id}"
-                        )
+        if not ret:
+            continue
 
-                        filename = (
-                            f"violation_{vehicle_id}.jpg"
-                        )
+        frame_bytes = buffer.tobytes()
 
-                        cv2.imwrite(filename, frame)
-
-            color = (
-                (0, 0, 255)
-                if vehicle_id in violators
-                else (0, 255, 0)
-            )
-
-            cv2.rectangle(
-                frame,
-                (x1, y1),
-                (x2, y2),
-                color,
-                2
-            )
-
-            cv2.circle(
-                frame,
-                (cx, cy),
-                5,
-                color,
-                -1
-            )
-
-            label = f"ID {vehicle_id}"
-
-            if vehicle_id in violators:
-                label += " VIOLATION"
-
-            cv2.putText(
-                frame,
-                label,
-                (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2
-            )
-
-    cv2.imshow(
-        "Parkapumi",
-        frame
-    )
-
-    if cv2.waitKey(1) == 27:
-        break
-
-
-cap.release()
-cv2.destroyAllWindows()
+        yield (
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' +
+            frame_bytes +
+            b'\r\n'
+        )

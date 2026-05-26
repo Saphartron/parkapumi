@@ -1,0 +1,7 @@
+flask
+opencv-python-headless
+numpy
+ultralytics
+yt-dlp
+torch
+torchvision

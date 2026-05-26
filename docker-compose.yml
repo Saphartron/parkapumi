@@ -1,0 +1,7 @@
+services:
+  traffic-vision:
+    build: .
+    container_name: traffic_vision
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
